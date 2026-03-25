@@ -1,26 +1,74 @@
 # next-auth-kit
 
-Production-grade authentication library for Next.js (App Router & Pages Router).
+A production-grade authentication library for Next.js. Handles access tokens, refresh tokens, session management, and route protection — so you don't have to wire it all up yourself.
+
+Works with both the App Router and Pages Router. Fully typed with TypeScript.
+
+---
+
+## The Problem
+
+Authentication in Next.js involves a lot of moving parts:
+
+- Storing tokens securely
+- Refreshing access tokens before they expire
+- Keeping client and server sessions in sync
+- Protecting routes on both the client and server
+- Wiring up login, logout, and user fetching from scratch
+
+Most projects end up with hundreds of lines of boilerplate before a single feature is built.
+
+---
+
+## The Solution
+
+`next-auth-kit` gives you a single `AuthProvider` and a set of hooks that handle the entire auth lifecycle. You configure your API endpoints once, and the library takes care of the rest:
+
+- Tokens are stored in cookies or memory
+- Access tokens are automatically refreshed before they expire
+- Sessions are restored on page load from stored tokens
+- Routes can be protected client-side with a hook or server-side with middleware
+- Every API request made through the built-in fetch wrapper gets a `Bearer` token injected automatically
+
+---
 
 ## Features
 
-- Access token + refresh token lifecycle management
-- Works on client-side and server-side (SSR/App Router)
-- React `AuthProvider` + `useAuth`, `useSession`, `useRequireAuth` hooks
-- Configurable backend API endpoints
-- Secure session management (AES-GCM encrypted cookies)
-- Expiry formats: `"15m"`, `"2h"`, `"2d"`, `"7d"`, `"1w"` or plain seconds
-- Three expiry strategies: `"backend"`, `"config"`, `"hybrid"`
-- Auto-refresh with deduplication
-- Next.js middleware for route protection
-- Fully typed (TypeScript-first)
+- `AuthProvider` — React context provider that initializes and manages auth state
+- `useAuth` — login, logout, refresh, and session in one hook
+- `useSession` — read-only access to the current session
+- `useRequireAuth` — redirects unauthenticated users, works in App Router and Pages Router
+- Token storage in cookies or in-memory
+- AES-GCM encrypted session cookies (server-side)
+- Automatic access token refresh on a 30-second interval (when `autoRefresh` is enabled)
+- 401 → refresh → retry built into the HTTP client
+- `getServerSession` — read and validate the session in server components and API routes
+- `withAuth` — higher-order function to protect App Router route handlers
+- `authMiddleware` — Next.js middleware factory for edge-level route protection
+- Flexible expiry parsing: `"15m"`, `"2h"`, `"2d"`, `"7d"`, `"1w"`, or plain seconds
+- Three expiry strategies: `backend`, `config`, `hybrid`
+- Fully typed with TypeScript generics for custom user shapes
 
 ---
 
 ## Installation
 
 ```bash
+npm install next-auth-kit
+# or
+yarn add next-auth-kit
+# or
 pnpm add next-auth-kit
+# or
+bun add next-auth-kit
+```
+
+**Peer dependencies** (already installed in any Next.js project):
+
+```
+next >= 13
+react >= 18
+react-dom >= 18
 ```
 
 ---
@@ -33,24 +81,34 @@ pnpm add next-auth-kit
 // lib/auth.ts
 import type { AuthConfig } from "next-auth-kit";
 
-export const authConfig: AuthConfig = {
+interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export const authConfig: AuthConfig<User> = {
   baseUrl: process.env.NEXT_PUBLIC_API_URL!,
+
   endpoints: {
     login: "/auth/login",
     refresh: "/auth/refresh",
     logout: "/auth/logout",
     me: "/auth/me",
   },
+
   token: {
     storage: "cookie",
     cookieName: "myapp.session",
     secure: true,
     sameSite: "lax",
   },
+
   secret: process.env.AUTH_SECRET!,
+
   autoRefresh: true,
+
   expiry: {
-    // Matches JWT_ACCESS_EXPIRES_IN=2d, JWT_REFRESH_EXPIRES_IN=7d
     accessTokenExpiresIn: "2d",
     refreshTokenExpiresIn: "7d",
     strategy: "hybrid",
@@ -58,16 +116,16 @@ export const authConfig: AuthConfig = {
 };
 ```
 
-### 2. Wrap your app
+### 2. Wrap your app with `AuthProvider`
 
 ```tsx
 // app/layout.tsx
 import { AuthProvider } from "next-auth-kit/react";
 import { authConfig } from "@/lib/auth";
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html>
+    <html lang="en">
       <body>
         <AuthProvider config={authConfig}>{children}</AuthProvider>
       </body>
@@ -76,126 +134,387 @@ export default function RootLayout({ children }) {
 }
 ```
 
-### 3. Use hooks
+### 3. Use the hooks
 
 ```tsx
-// Login
-const { login, isLoading } = useAuth();
-await login({ email, password });
+"use client";
 
-// Session
-const { user, isAuthenticated } = useSession();
+import { useAuth } from "next-auth-kit/react";
 
-// Protect a page
-useRequireAuth({ redirectTo: "/login" });
-```
+export default function LoginPage() {
+  const { login, isLoading } = useAuth();
 
-### 4. Server-side session
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    await login({ email: form.get("email"), password: form.get("password") });
+  }
 
-```ts
-// app/dashboard/page.tsx
-import { getServerSession } from "next-auth-kit/server";
-import { cookies } from "next/headers";
-
-export default async function Page() {
-  const cookieStore = await cookies();
-  const session = await getServerSession(
-    { cookies: { get: (name) => cookieStore.get(name) } },
-    authConfig
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="email" type="email" required />
+      <input name="password" type="password" required />
+      <button type="submit" disabled={isLoading}>
+        {isLoading ? "Signing in…" : "Sign in"}
+      </button>
+    </form>
   );
-  if (!session.isAuthenticated) redirect("/login");
 }
 ```
 
-### 5. Middleware
-
-```ts
-// middleware.ts
-import { authMiddleware } from "next-auth-kit/server";
-import { authConfig } from "@/lib/auth";
-
-export const middleware = authMiddleware(authConfig);
-
-export const config = {
-  matcher: ["/dashboard/:path*"],
-};
-```
-
 ---
 
-## Expiry Formats
-
-| Input   | Resolved  |
-|---------|-----------|
-| `900`   | 900s      |
-| `"15m"` | 900s      |
-| `"2h"`  | 7200s     |
-| `"2d"`  | 172800s   |
-| `"7d"`  | 604800s   |
-| `"1w"`  | 604800s   |
-
-## Expiry Strategies
-
-| Strategy   | Behaviour                                      |
-|------------|------------------------------------------------|
-| `backend`  | Trust `expiresIn` from API response only       |
-| `config`   | Use `expiry` config values only                |
-| `hybrid`   | Backend first, fallback to config (default)    |
-
----
-
-## API Reference
+## Usage
 
 ### `AuthProvider`
 
-| Prop     | Type         | Required |
-|----------|--------------|----------|
-| `config` | `AuthConfig` | ✓        |
+Wrap your application once at the root. It initializes the `AuthClient`, restores any existing session from stored tokens on mount, and subscribes all child hooks to session changes.
 
-### `useAuth()`
+```tsx
+<AuthProvider config={authConfig}>
+  {children}
+</AuthProvider>
+```
+
+When `autoRefresh: true` is set, the provider checks every 30 seconds whether the access token is near expiry and refreshes it silently in the background.
+
+#### Full config reference
 
 ```ts
-{
-  session: AuthSession;
-  login: (input: LoginInput) => Promise<void>;
-  logout: () => Promise<void>;
-  refresh: () => Promise<void>;
-  isLoading: boolean;
+interface AuthConfig<User = unknown> {
+  // Base URL of your backend API
+  baseUrl: string;
+
+  endpoints: {
+    login: string;       // required
+    refresh: string;     // required
+    register?: string;
+    logout?: string;
+    me?: string;         // fetched after login/session restore to populate user
+  };
+
+  routes?: {
+    public: string[];    // always accessible, e.g. ["/", "/login"]
+    protected: string[]; // require auth, supports wildcard: "/dashboard/*"
+  };
+
+  token: {
+    storage: "cookie" | "memory";
+    cookieName?: string;   // default: "next-auth-kit.session"
+    secure?: boolean;      // default: true
+    sameSite?: "strict" | "lax" | "none"; // default: "lax"
+  };
+
+  // Used to AES-GCM encrypt session cookies server-side
+  secret: string;
+
+  // Automatically refresh the access token before it expires
+  autoRefresh?: boolean;
+
+  // Seconds before expiry to trigger a proactive refresh (default: 60)
+  refreshThreshold?: number;
+
+  expiry?: {
+    accessTokenExpiresIn?: number | string;  // e.g. "2d", 3600
+    refreshTokenExpiresIn?: number | string; // e.g. "7d"
+    strategy?: "backend" | "config" | "hybrid"; // default: "hybrid"
+  };
+
+  // Provide a custom fetch implementation (e.g. for testing)
+  fetchFn?: typeof fetch;
+
+  // Lifecycle callbacks
+  onLogin?: (session: AuthSession<User>) => void;
+  onLogout?: () => void;
+  onRefreshError?: (error: unknown) => void;
 }
 ```
 
-### `useSession()`
+---
 
-Returns `AuthSession` — read-only.
+### `useAuth`
 
-### `useRequireAuth(options?)`
+The primary hook. Gives you everything you need to build auth flows.
+
+```ts
+const { session, login, logout, refresh, isLoading } = useAuth<User>();
+```
+
+| Property    | Type                                    | Description                                      |
+|-------------|-----------------------------------------|--------------------------------------------------|
+| `session`   | `AuthSession<User>`                     | Current auth session                             |
+| `login`     | `(input: LoginInput) => Promise<void>`  | POST to your login endpoint, stores tokens       |
+| `logout`    | `() => Promise<void>`                   | Clears tokens, calls logout endpoint if set      |
+| `refresh`   | `() => Promise<void>`                   | Manually trigger a token refresh                 |
+| `isLoading` | `boolean`                               | `true` while initializing or during login        |
+
+`LoginInput` is an open object (`{ [key: string]: unknown }`), so you can pass any fields your backend expects.
+
+---
+
+### `useSession`
+
+Read-only access to the current session. Use this in components that only need to display user data.
+
+```ts
+const { user, tokens, isAuthenticated } = useSession<User>();
+```
+
+---
+
+### `useRequireAuth`
+
+Redirects unauthenticated users. Call it at the top of any protected client component.
+
+```ts
+useRequireAuth({ redirectTo: "/login" });
+```
+
+You can also pass a custom handler instead of a redirect path:
+
+```ts
+useRequireAuth({
+  onUnauthenticated: () => router.push("/login?from=/dashboard"),
+});
+```
+
+The hook waits for `isLoading` to be `false` before acting, so it won't flash a redirect during the initial session restore.
 
 | Option              | Type         | Default    |
 |---------------------|--------------|------------|
 | `redirectTo`        | `string`     | `"/login"` |
 | `onUnauthenticated` | `() => void` | —          |
 
-### `getServerSession(req, config)`
+---
 
-Returns `Promise<AuthSession>`. Reads encrypted cookie, validates expiry, refreshes if needed.
+### Protecting API Routes with `withAuth`
 
-### `authMiddleware(config)`
-
-Returns a Next.js middleware function. Protects routes defined in `config.routes.protected`.
-
-### `parseExpiry(input)`
+Wrap App Router route handlers to require authentication:
 
 ```ts
-parseExpiry("2d")  // → 172800
-parseExpiry("7d")  // → 604800
-parseExpiry(3600)  // → 3600
+// app/api/profile/route.ts
+import { withAuth } from "next-auth-kit/server";
+import { authConfig } from "@/lib/auth";
+
+export const GET = withAuth(authConfig, async (req, session) => {
+  return Response.json({ user: session.user });
+});
 ```
+
+Unauthenticated requests are redirected to `/login` by default. Pass `{ redirectTo: "/your-path" }` as the third argument to override.
+
+---
+
+### Middleware (Edge Route Protection)
+
+Protect entire route groups at the edge using Next.js middleware:
+
+```ts
+// middleware.ts  (project root)
+import { authMiddleware } from "next-auth-kit/server";
+import { authConfig } from "@/lib/auth";
+
+export const middleware = authMiddleware(authConfig);
+
+export const config = {
+  matcher: ["/dashboard/:path*", "/settings/:path*"],
+};
+```
+
+The middleware reads the encrypted session cookie, checks whether the refresh token is still valid, and redirects to `/login` if not. Routes listed in `config.routes.public` are always allowed through.
+
+---
+
+## Session and Token Handling
+
+### How tokens are stored
+
+| Storage mode | Where                                                                 |
+|--------------|-----------------------------------------------------------------------|
+| `"cookie"`   | Serialized as JSON in a browser cookie with `Secure` + `SameSite`    |
+| `"memory"`   | Held in a JavaScript variable — cleared on page refresh               |
+
+Server-side (in `getServerSession` and `authMiddleware`), the cookie value is expected to be AES-GCM encrypted using your `secret`. The `TokenManager` provides `encryptTokens` / `decryptTokens` helpers for this.
+
+### Session restore on page load
+
+When `AuthProvider` mounts, it calls `client.initialize()`, which:
+
+1. Reads tokens from the configured storage
+2. Checks whether the access token is expired (accounting for `refreshThreshold`)
+3. If the access token is near expiry but the refresh token is still valid, it silently refreshes
+4. If a `me` endpoint is configured, it fetches the user profile to populate `session.user`
+5. Updates React state — `isLoading` flips to `false` once complete
+
+### Automatic refresh
+
+When `autoRefresh: true`, the provider runs a check every 30 seconds. If the access token is within `refreshThreshold` seconds of expiry (default: 60s) and the refresh token is still valid, it calls the refresh endpoint automatically.
+
+The HTTP client also handles 401 responses: it attempts a token refresh and retries the original request once. Multiple concurrent 401s share a single refresh request (deduplicated via a shared promise).
+
+### Refresh flow
+
+```
+Request → 401 → refresh endpoint → new tokens stored → original request retried
+```
+
+If the refresh token is expired, the user is logged out and the session is cleared.
+
+---
+
+## Server-Side Session (`getServerSession`)
+
+Use this in App Router server components and API routes to read the session without going through the client:
+
+```ts
+// app/dashboard/page.tsx
+import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
+import { getServerSession } from "next-auth-kit/server";
+import { authConfig } from "@/lib/auth";
+
+export default async function DashboardPage() {
+  const cookieStore = await cookies();
+
+  const session = await getServerSession(
+    { cookies: { get: (name) => cookieStore.get(name) } },
+    authConfig
+  );
+
+  if (!session.isAuthenticated) {
+    redirect("/login");
+  }
+
+  return <h1>Welcome, {session.user.name}</h1>;
+}
+```
+
+`getServerSession` decrypts the session cookie, validates expiry, and attempts a server-side token refresh if the access token is near expiry but the refresh token is still valid.
+
+---
+
+## Backend Requirements
+
+Your API needs to implement the following contract:
+
+### `POST /auth/login`
+
+Request body: whatever fields you pass to `login()` (e.g. `{ email, password }`)
+
+Response:
+
+```json
+{
+  "accessToken": "eyJ...",
+  "refreshToken": "eyJ...",
+  "user": { "id": "1", "email": "user@example.com", "name": "Jane" },
+
+  // Optional — used by "backend" and "hybrid" expiry strategies
+  "accessTokenExpiresIn": "2d",
+  "refreshTokenExpiresIn": "7d",
+
+  // Legacy field, also accepted
+  "expiresIn": 172800
+}
+```
+
+### `POST /auth/refresh`
+
+Request body:
+
+```json
+{ "refreshToken": "eyJ..." }
+```
+
+Response: same shape as the login response (new `accessToken` + `refreshToken`).
+
+### `GET /auth/me` _(optional)_
+
+Returns the current user object. Called after login and on session restore if the `me` endpoint is configured.
+
+### `POST /auth/logout` _(optional)_
+
+Called on logout. Failure is silently ignored — tokens are always cleared locally regardless.
+
+---
+
+## Expiry Formats
+
+The `parseExpiry` utility accepts:
+
+| Input   | Seconds   |
+|---------|-----------|
+| `900`   | 900       |
+| `"15m"` | 900       |
+| `"2h"`  | 7 200     |
+| `"2d"`  | 172 800   |
+| `"7d"`  | 604 800   |
+| `"1w"`  | 604 800   |
+
+### Expiry strategies
+
+| Strategy  | Behaviour                                                        |
+|-----------|------------------------------------------------------------------|
+| `backend` | Use only the expiry values returned by the API                   |
+| `config`  | Use only the values set in `expiry` config                       |
+| `hybrid`  | API response first; fall back to config if not present (default) |
+
+`hybrid` is the safest choice — it works whether or not your backend returns expiry fields.
+
+---
+
+## TypeScript Types
+
+```ts
+interface AuthSession<User = unknown> {
+  user: User | null;
+  tokens: AuthTokens | null;
+  isAuthenticated: boolean;
+}
+
+interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  accessTokenExpiresAt: number;   // Unix timestamp in ms
+  refreshTokenExpiresAt?: number; // Unix timestamp in ms
+}
+
+interface LoginResponse<User = unknown> {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+  expiresIn?: number;
+  accessTokenExpiresIn?: number | string;
+  refreshTokenExpiresIn?: number | string;
+}
+
+type ExpiryInput = number | string;
+type ExpiryStrategy = "backend" | "config" | "hybrid";
+```
+
+All types are exported from the root `next-auth-kit` import.
+
+---
+
+## Who This Is For
+
+- Developers building Next.js apps who want auth that just works
+- Teams that need a consistent auth pattern across multiple projects
+- Anyone tired of writing the same token refresh logic over and over
+- SaaS and MVP builders who want to ship features, not auth plumbing
 
 ---
 
 ## Security Notes
 
-- Refresh tokens are stored in encrypted `httpOnly`-style cookies (AES-GCM)
-- Access tokens can be stored in memory (safest) or cookies
-- The `secret` is used for AES-GCM encryption — use a 32-char random string in production
-- CSRF protection relies on `SameSite` cookie policy
+- Session cookies use `Secure` and `SameSite` flags by default
+- Server-side cookies are AES-GCM encrypted using your `secret`
+- Use a random 32-character string for `secret` in production — never commit it
+- The `"memory"` storage mode keeps tokens out of cookies entirely, at the cost of losing the session on page refresh
+- Refresh tokens are never exposed to JavaScript when using server-side encrypted cookies
+
+---
+
+## License
+
+MIT
