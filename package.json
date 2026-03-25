@@ -1,6 +1,6 @@
 {
   "name": "next-auth-kit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Production-grade authentication library for Next.js (App Router & Pages Router)",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -28,8 +28,17 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx"
   },
-  "files": ["dist"],
-  "keywords": ["nextjs", "authentication", "auth", "jwt", "tokens", "typescript"],
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "nextjs",
+    "authentication",
+    "auth",
+    "jwt",
+    "tokens",
+    "typescript"
+  ],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@10.18.2",
