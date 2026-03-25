@@ -50,7 +50,7 @@ export class TokenManager {
   // ─── Cookie helpers (client-side only) ──────────────────────────────────────
 
   private cookieName(): string {
-    return this.config.token.cookieName ?? "next-auth-kit.session";
+    return this.config.token.cookieName ?? "next-token-auth.session";
   }
 
   private readFromCookie(): AuthTokens | null {

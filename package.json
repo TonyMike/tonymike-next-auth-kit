@@ -7,7 +7,7 @@
   "types": "./dist/index.d.ts",
   "repository": {
   "type": "git",
-  "url": "https://github.com/TonyMike/tonymike-next-auth-kit.git"
+  "url": "https://github.com/TonyMike/tonymike-next-token-auth.git"
 },
   "exports": {
     ".": {

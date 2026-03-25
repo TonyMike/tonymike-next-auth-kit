@@ -1,4 +1,4 @@
-# next-auth-kit
+# next-token-auth
 
 A production-grade authentication library for Next.js. Handles access tokens, refresh tokens, session management, and route protection — so you don't have to wire it all up yourself.
 
@@ -22,7 +22,7 @@ Most projects end up with hundreds of lines of boilerplate before a single featu
 
 ## The Solution
 
-`next-auth-kit` gives you a single `AuthProvider` and a set of hooks that handle the entire auth lifecycle. You configure your API endpoints once, and the library takes care of the rest:
+`next-token-auth` gives you a single `AuthProvider` and a set of hooks that handle the entire auth lifecycle. You configure your API endpoints once, and the library takes care of the rest:
 
 - Tokens are stored in cookies or memory
 - Access tokens are automatically refreshed before they expire
@@ -54,13 +54,13 @@ Most projects end up with hundreds of lines of boilerplate before a single featu
 ## Installation
 
 ```bash
-npm install next-auth-kit
+npm install next-token-auth
 # or
-yarn add next-auth-kit
+yarn add next-token-auth
 # or
-pnpm add next-auth-kit
+pnpm add next-token-auth
 # or
-bun add next-auth-kit
+bun add next-token-auth
 ```
 
 **Peer dependencies** (already installed in any Next.js project):
@@ -79,7 +79,7 @@ react-dom >= 18
 
 ```ts
 // lib/auth.ts
-import type { AuthConfig } from "next-auth-kit";
+import type { AuthConfig } from "next-token-auth";
 
 interface User {
   id: string;
@@ -120,7 +120,7 @@ export const authConfig: AuthConfig<User> = {
 
 ```tsx
 // app/layout.tsx
-import { AuthProvider } from "next-auth-kit/react";
+import { AuthProvider } from "next-token-auth/react";
 import { authConfig } from "@/lib/auth";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -139,7 +139,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 ```tsx
 "use client";
 
-import { useAuth } from "next-auth-kit/react";
+import { useAuth } from "next-token-auth/react";
 
 export default function LoginPage() {
   const { login, isLoading } = useAuth();
@@ -200,7 +200,7 @@ interface AuthConfig<User = unknown> {
 
   token: {
     storage: "cookie" | "memory";
-    cookieName?: string;   // default: "next-auth-kit.session"
+    cookieName?: string;   // default: "next-token-auth.session"
     secure?: boolean;      // default: true
     sameSite?: "strict" | "lax" | "none"; // default: "lax"
   };
@@ -293,7 +293,7 @@ Wrap App Router route handlers to require authentication:
 
 ```ts
 // app/api/profile/route.ts
-import { withAuth } from "next-auth-kit/server";
+import { withAuth } from "next-token-auth/server";
 import { authConfig } from "@/lib/auth";
 
 export const GET = withAuth(authConfig, async (req, session) => {
@@ -311,7 +311,7 @@ Protect entire route groups at the edge using Next.js middleware:
 
 ```ts
 // middleware.ts  (project root)
-import { authMiddleware } from "next-auth-kit/server";
+import { authMiddleware } from "next-token-auth/server";
 import { authConfig } from "@/lib/auth";
 
 export const middleware = authMiddleware(authConfig);
@@ -370,7 +370,7 @@ Use this in App Router server components and API routes to read the session with
 // app/dashboard/page.tsx
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import { getServerSession } from "next-auth-kit/server";
+import { getServerSession } from "next-token-auth/server";
 import { authConfig } from "@/lib/auth";
 
 export default async function DashboardPage() {
@@ -492,7 +492,7 @@ type ExpiryInput = number | string;
 type ExpiryStrategy = "backend" | "config" | "hybrid";
 ```
 
-All types are exported from the root `next-auth-kit` import.
+All types are exported from the root `next-token-auth` import.
 
 ---
 

@@ -20,7 +20,7 @@ type NextRequest = {
  *
  * @example
  * // app/dashboard/page.tsx
- * import { getServerSession } from "next-auth-kit/server";
+ * import { getServerSession } from "next-token-auth/server";
  *
  * export default async function Page({ request }) {
  *   const session = await getServerSession(request, config);
@@ -31,7 +31,7 @@ export async function getServerSession<User = unknown>(
   req: NextRequest,
   config: AuthConfig<User>
 ): Promise<AuthSession<User>> {
-  const cookieName = config.token.cookieName ?? "next-auth-kit.session";
+  const cookieName = config.token.cookieName ?? "next-token-auth.session";
   const cookieValue = req.cookies.get(cookieName)?.value;
 
   if (!cookieValue) {

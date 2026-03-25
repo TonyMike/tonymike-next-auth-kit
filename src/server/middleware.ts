@@ -7,7 +7,7 @@ import type { AuthTokens } from "../types";
  *
  * @example
  * // middleware.ts (project root)
- * import { authMiddleware } from "next-auth-kit/server";
+ * import { authMiddleware } from "next-token-auth/server";
  * import { config as authConfig } from "./lib/auth";
  *
  * export const middleware = authMiddleware(authConfig);
@@ -42,7 +42,7 @@ export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
     }
 
     // Validate session cookie
-    const cookieName = authConfig.token.cookieName ?? "next-auth-kit.session";
+    const cookieName = authConfig.token.cookieName ?? "next-token-auth.session";
     const cookieValue = request.cookies.get(cookieName)?.value;
 
     if (!cookieValue) {
