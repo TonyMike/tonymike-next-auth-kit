@@ -1,10 +1,14 @@
 {
-  "name": "next-auth-kit",
-  "version": "1.0.1",
+  "name": "next-token-auth",
+  "version": "1.0.0",
   "description": "Production-grade authentication library for Next.js (App Router & Pages Router)",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "repository": {
+  "type": "git",
+  "url": "https://github.com/TonyMike/tonymike-next-auth-kit.git"
+},
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
