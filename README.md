@@ -287,6 +287,44 @@ The hook waits for `isLoading` to be `false` before acting, so it won't flash a 
 
 ---
 
+### Making Authenticated API Requests
+
+When you need to call your own backend endpoints that require an access token, use `client.fetch` from the `useAuth` hook. It automatically injects `Authorization: Bearer <token>` and handles 401 → refresh → retry for you.
+
+```ts
+"use client";
+
+import { useAuth } from "next-token-auth/react";
+
+export default function Orders() {
+  const { client } = useAuth();
+
+  async function fetchOrders() {
+    const res = await client.fetch("https://api.example.com/orders");
+    const data = await res.json();
+    console.log(data);
+  }
+
+  return <button onClick={fetchOrders}>Load Orders</button>;
+}
+```
+
+You can also read the token directly from the session if you need to pass it manually:
+
+```ts
+const { session } = useAuth();
+
+const res = await fetch("https://api.example.com/orders", {
+  headers: {
+    Authorization: `Bearer ${session.tokens?.accessToken}`,
+  },
+});
+```
+
+`client.fetch` is the recommended approach — it keeps your requests resilient to token expiry without any extra work on your end.
+
+---
+
 ### Protecting API Routes with `withAuth`
 
 Wrap App Router route handlers to require authentication:
