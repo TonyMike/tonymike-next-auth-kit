@@ -201,9 +201,9 @@ interface AuthConfig<User = unknown> {
   };
 
   routes?: {
-    public: string[];    // always accessible, e.g. ["/", "/about"]
-    protected: string[]; // require auth, supports wildcard: "/dashboard*"
-    guestOnly?: string[]; // accessible only when NOT authenticated, e.g. ["/auth/login", "/auth/register"]
+    public: string[];     // always accessible regardless of auth state
+    protected: string[];  // require auth, supports wildcard: "/dashboard*"
+    guestOnly?: string[]; // only accessible when NOT authenticated — any route name works
     loginPath?: string;   // where to redirect unauthenticated users (default: "/login")
     redirectAuthenticatedTo?: string; // where to send authenticated users who hit a guestOnly route (default: "/dashboard")
   };
