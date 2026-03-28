@@ -358,8 +358,10 @@ Unauthenticated requests are redirected to `/login` by default. Pass `{ redirect
 Protect entire route groups at the edge using Next.js middleware. The middleware supports three route categories:
 
 - `public` — always accessible, no auth check
-- `protected` — requires authentication, redirects to `/login` if not
-- `guestOnly` — accessible only when NOT authenticated (e.g. login, register pages); authenticated users are redirected away
+- `protected` — requires authentication, redirects to `loginPath` if not
+- `guestOnly` — accessible only when NOT authenticated; authenticated users are redirected to `redirectAuthenticatedTo`
+
+You can use any route naming convention you want — the library doesn't enforce `/login`, `/dashboard`, or any specific path. Everything is driven by your config.
 
 ```ts
 // lib/auth.ts
@@ -367,10 +369,10 @@ export const authConfig: AuthConfig = {
   // ...
   routes: {
     public: ["/", "/about"],
-    guestOnly: ["/auth/login", "/auth/register"], // authenticated users get redirected away
-    protected: ["/dashboard*", "/profile*"],
-    loginPath: "/auth/login",              // where to redirect unauthenticated users
-    redirectAuthenticatedTo: "/dashboard", // where to redirect authenticated users on guestOnly routes
+    guestOnly: ["/sign-in", "/sign-up"],   // any names you want
+    protected: ["/app*", "/account*"],
+    loginPath: "/sign-in",                 // where unauthenticated users are sent
+    redirectAuthenticatedTo: "/app/home",  // where authenticated users are sent from guestOnly routes
   },
 };
 ```
@@ -383,9 +385,28 @@ import { authConfig } from "@/lib/auth";
 export const middleware = authMiddleware(authConfig);
 
 export const config = {
-  // Include all routes you want the middleware to run on
-  matcher: ["/auth/login", "/auth/register", "/dashboard*", "/profile*"],
+  matcher: ["/sign-in", "/sign-up", "/app*", "/account*"],
 };
+```
+
+Some other valid setups:
+
+```ts
+// Using /auth/* convention
+routes: {
+  guestOnly: ["/auth/login", "/auth/register"],
+  protected: ["/dashboard*"],
+  loginPath: "/auth/login",
+  redirectAuthenticatedTo: "/dashboard",
+}
+
+// Using a portal pattern
+routes: {
+  guestOnly: ["/portal"],
+  protected: ["/admin*", "/workspace*"],
+  loginPath: "/portal",
+  redirectAuthenticatedTo: "/admin",
+}
 ```
 
 Route resolution order inside the middleware:
@@ -398,6 +419,8 @@ Two things to keep in mind:
 
 - Wildcard patterns use `*` at the end: `"/dashboard*"` matches `/dashboard`, `/dashboard/`, and `/dashboard/settings`
 - The `matcher` in `export const config` controls which routes Next.js runs the middleware on at all — make sure it covers both your protected and guest-only routes
+- `loginPath` defaults to `"/login"` if not set
+- `redirectAuthenticatedTo` defaults to `"/dashboard"` if not set
 
 ---
 
