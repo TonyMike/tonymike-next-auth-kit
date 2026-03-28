@@ -8,12 +8,12 @@ import type { AuthTokens } from "../types";
  * @example
  * // middleware.ts (project root)
  * import { authMiddleware } from "next-token-auth/server";
- * import { config as authConfig } from "./lib/auth";
+ * import { authConfig } from "./lib/auth";
  *
  * export const middleware = authMiddleware(authConfig);
  *
  * export const config = {
- *   matcher: ["/dashboard/:path*", "/profile/:path*"],
+ *   matcher: ["/dashboard/:path*", "/login", "/register"],
  * };
  */
 export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
@@ -25,14 +25,31 @@ export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
     const { NextResponse } = await import("next/server");
 
     const pathname = request.nextUrl.pathname;
+    const cookieName = authConfig.token.cookieName ?? "next-token-auth.session";
+    const cookieValue = request.cookies.get(cookieName)?.value;
 
-    // Allow public routes
+    // Resolve whether the session is valid
+    const isAuthenticated = await checkSession(cookieValue, authConfig.secret);
+
+    // ── Guest-only routes (e.g. /login, /register) ──────────────────────────
+    // Accessible only when NOT authenticated. Redirect authenticated users away.
+    const guestOnlyRoutes = authConfig.routes?.guestOnly ?? [];
+    if (isGuestOnlyRoute(pathname, guestOnlyRoutes)) {
+      if (isAuthenticated) {
+        const redirectTo = authConfig.routes?.redirectAuthenticatedTo ?? "/dashboard";
+        return NextResponse.redirect(new URL(redirectTo, request.nextUrl.origin));
+      }
+      return NextResponse.next();
+    }
+
+    // ── Public routes ────────────────────────────────────────────────────────
+    // Always accessible regardless of auth state.
     const publicRoutes = authConfig.routes?.public ?? [];
     if (isPublicRoute(pathname, publicRoutes)) {
       return NextResponse.next();
     }
 
-    // Check if route requires protection
+    // ── Protected routes ─────────────────────────────────────────────────────
     const protectedRoutes = authConfig.routes?.protected ?? [];
     const requiresAuth =
       protectedRoutes.length === 0 || isProtectedRoute(pathname, protectedRoutes);
@@ -41,35 +58,42 @@ export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
       return NextResponse.next();
     }
 
-    // Validate session cookie
-    const cookieName = authConfig.token.cookieName ?? "next-token-auth.session";
-    const cookieValue = request.cookies.get(cookieName)?.value;
-
-    if (!cookieValue) {
+    if (!isAuthenticated) {
       return redirectToLogin(request, NextResponse);
     }
 
-    try {
-      const json = await decrypt(cookieValue, authConfig.secret);
-      const tokens = JSON.parse(json) as AuthTokens;
-
-      const now = Date.now();
-      const refreshExpired = tokens.refreshTokenExpiresAt
-        ? now >= tokens.refreshTokenExpiresAt
-        : false;
-
-      if (refreshExpired) {
-        return redirectToLogin(request, NextResponse);
-      }
-
-      return NextResponse.next();
-    } catch {
-      return redirectToLogin(request, NextResponse);
-    }
+    return NextResponse.next();
   };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Session check ────────────────────────────────────────────────────────────
+
+async function checkSession(
+  cookieValue: string | undefined,
+  secret: string
+): Promise<boolean> {
+  if (!cookieValue) return false;
+
+  try {
+    const json = await decrypt(cookieValue, secret);
+    const tokens = JSON.parse(json) as AuthTokens;
+
+    const now = Date.now();
+    const refreshExpired = tokens.refreshTokenExpiresAt
+      ? now >= tokens.refreshTokenExpiresAt
+      : false;
+
+    return !refreshExpired;
+  } catch {
+    return false;
+  }
+}
+
+// ─── Route matchers ───────────────────────────────────────────────────────────
+
+function isGuestOnlyRoute(pathname: string, routes: string[]): boolean {
+  return routes.some((route) => matchRoute(pathname, route));
+}
 
 function isPublicRoute(pathname: string, publicRoutes: string[]): boolean {
   return publicRoutes.some((route) => matchRoute(pathname, route));
@@ -90,6 +114,5 @@ function redirectToLogin(
   request: { nextUrl: { origin: string } },
   NextResponse: { redirect(url: URL): Response }
 ): Response {
-  const loginUrl = new URL("/login", request.nextUrl.origin);
-  return NextResponse.redirect(loginUrl);
+  return NextResponse.redirect(new URL("/login", request.nextUrl.origin));
 }

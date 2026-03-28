@@ -27,7 +27,7 @@
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --dts",
+    "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx"
