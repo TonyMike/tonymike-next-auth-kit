@@ -19,7 +19,27 @@ export class TokenManager {
     if (this.config.token.storage === "memory") {
       return this.memoryStore;
     }
-    return this.readFromCookie();
+    // Return the in-memory cache (populated by setTokens or initFromCookie)
+    return this.decryptedCache;
+  }
+
+  /**
+   * Must be called once on startup (before getTokens) when storage is "cookie".
+   * Reads and decrypts the cookie, populating the in-memory cache.
+   */
+  async initFromCookie(): Promise<void> {
+    if (typeof document === "undefined") return;
+    if (this.config.token.storage !== "cookie") return;
+
+    const raw = getCookieValue(this.cookieName());
+    if (!raw) return;
+
+    try {
+      const json = await decrypt(decodeURIComponent(raw), this.config.secret);
+      this.decryptedCache = JSON.parse(json) as AuthTokens;
+    } catch {
+      this.decryptedCache = null;
+    }
   }
 
   async setTokens(tokens: AuthTokens): Promise<void> {
@@ -32,6 +52,7 @@ export class TokenManager {
 
   clearTokens(): void {
     this.memoryStore = null;
+    this.decryptedCache = null;
     if (this.config.token.storage === "cookie") {
       this.deleteCookie();
     }
@@ -53,33 +74,22 @@ export class TokenManager {
     return this.config.token.cookieName ?? "next-token-auth.session";
   }
 
-  private readFromCookie(): AuthTokens | null {
-    if (typeof document === "undefined") return null;
-
-    const raw = getCookieValue(this.cookieName());
-    if (!raw) return null;
-
-    try {
-      // Tokens are stored as JSON; encryption is applied server-side via
-      // getServerSession. Client reads the plaintext access token from cookie.
-      return JSON.parse(decodeURIComponent(raw)) as AuthTokens;
-    } catch {
-      return null;
-    }
-  }
+  /** In-memory cache of the last successfully decrypted cookie value. */
+  private decryptedCache: AuthTokens | null = null;
 
   private async writeToCookie(tokens: AuthTokens): Promise<void> {
     if (typeof document === "undefined") return;
 
-    const value = encodeURIComponent(JSON.stringify(tokens));
+    // Encrypt before writing — must match what the server reads via decrypt()
+    const value = await encrypt(JSON.stringify(tokens), this.config.secret);
     const secure = this.config.token.secure !== false ? "; Secure" : "";
     const sameSite = this.config.token.sameSite ?? "lax";
     const maxAge = tokens.refreshTokenExpiresAt
       ? Math.floor((tokens.refreshTokenExpiresAt - Date.now()) / 1000)
-      : 604800; // 7 days default
+      : 604800;
 
     document.cookie = [
-      `${this.cookieName()}=${value}`,
+      `${this.cookieName()}=${encodeURIComponent(value)}`,
       `Max-Age=${maxAge}`,
       `Path=/`,
       `SameSite=${sameSite}`,
@@ -87,6 +97,9 @@ export class TokenManager {
     ]
       .filter(Boolean)
       .join("; ");
+
+    // Keep the in-memory cache in sync
+    this.decryptedCache = tokens;
   }
 
   private deleteCookie(): void {
@@ -97,7 +110,8 @@ export class TokenManager {
   // ─── Server-side helpers ─────────────────────────────────────────────────────
 
   /**
-   * Encrypts tokens for secure server-side cookie storage.
+   * Encrypts tokens — used internally by writeToCookie and available for
+   * advanced server-side use cases.
    */
   async encryptTokens(tokens: AuthTokens): Promise<string> {
     return encrypt(JSON.stringify(tokens), this.config.secret);

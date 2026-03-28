@@ -137,6 +137,9 @@ export class AuthClient<User = unknown> {
    * Loads the session from stored tokens (call on app mount).
    */
   async initialize(): Promise<AuthSession<User>> {
+    // Decrypt the cookie into the in-memory cache before any session reads
+    await this.tokenManager.initFromCookie();
+
     const session = await this.sessionManager.loadSession();
 
     // Proactively refresh if access token is near expiry
