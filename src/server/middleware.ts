@@ -13,7 +13,7 @@ import type { AuthTokens } from "../types";
  * export const middleware = authMiddleware(authConfig);
  *
  * export const config = {
- *   matcher: ["/dashboard/:path*", "/login", "/register"],
+ *   matcher: ["/auth/login", "/auth/register", "/dashboard*", "/profile*"],
  * };
  */
 export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
@@ -28,11 +28,11 @@ export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
     const cookieName = authConfig.token.cookieName ?? "next-token-auth.session";
     const cookieValue = request.cookies.get(cookieName)?.value;
 
-    // Resolve whether the session is valid
     const isAuthenticated = await checkSession(cookieValue, authConfig.secret);
 
-    // ── Guest-only routes (e.g. /login, /register) ──────────────────────────
-    // Accessible only when NOT authenticated. Redirect authenticated users away.
+    // ── Guest-only routes ────────────────────────────────────────────────────
+    // Accessible only when NOT authenticated.
+    // Authenticated users are redirected to redirectAuthenticatedTo.
     const guestOnlyRoutes = authConfig.routes?.guestOnly ?? [];
     if (isGuestOnlyRoute(pathname, guestOnlyRoutes)) {
       if (isAuthenticated) {
@@ -43,23 +43,24 @@ export function authMiddleware<User = unknown>(authConfig: AuthConfig<User>) {
     }
 
     // ── Public routes ────────────────────────────────────────────────────────
-    // Always accessible regardless of auth state.
     const publicRoutes = authConfig.routes?.public ?? [];
-    if (isPublicRoute(pathname, publicRoutes)) {
+    if (matchesAny(pathname, publicRoutes)) {
       return NextResponse.next();
     }
 
     // ── Protected routes ─────────────────────────────────────────────────────
     const protectedRoutes = authConfig.routes?.protected ?? [];
     const requiresAuth =
-      protectedRoutes.length === 0 || isProtectedRoute(pathname, protectedRoutes);
+      protectedRoutes.length === 0 || matchesAny(pathname, protectedRoutes);
 
     if (!requiresAuth) {
       return NextResponse.next();
     }
 
     if (!isAuthenticated) {
-      return redirectToLogin(request, NextResponse);
+      // Use the configured login endpoint path, falling back to "/login"
+      const loginPath = authConfig.routes?.loginPath ?? "/login";
+      return NextResponse.redirect(new URL(loginPath, request.nextUrl.origin));
     }
 
     return NextResponse.next();
@@ -77,12 +78,10 @@ async function checkSession(
   try {
     const json = await decrypt(cookieValue, secret);
     const tokens = JSON.parse(json) as AuthTokens;
-
     const now = Date.now();
     const refreshExpired = tokens.refreshTokenExpiresAt
       ? now >= tokens.refreshTokenExpiresAt
       : false;
-
     return !refreshExpired;
   } catch {
     return false;
@@ -92,27 +91,22 @@ async function checkSession(
 // ─── Route matchers ───────────────────────────────────────────────────────────
 
 function isGuestOnlyRoute(pathname: string, routes: string[]): boolean {
-  return routes.some((route) => matchRoute(pathname, route));
+  return matchesAny(pathname, routes);
 }
 
-function isPublicRoute(pathname: string, publicRoutes: string[]): boolean {
-  return publicRoutes.some((route) => matchRoute(pathname, route));
-}
-
-function isProtectedRoute(pathname: string, protectedRoutes: string[]): boolean {
-  return protectedRoutes.some((route) => matchRoute(pathname, route));
+/**
+ * Matches a pathname against a list of patterns.
+ * Supports wildcards: "/dashboard*" matches "/dashboard", "/dashboard/", "/dashboard/settings"
+ */
+function matchesAny(pathname: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => matchRoute(pathname, pattern));
 }
 
 function matchRoute(pathname: string, pattern: string): boolean {
   if (pattern.endsWith("*")) {
-    return pathname.startsWith(pattern.slice(0, -1));
+    const base = pattern.slice(0, -1); // e.g. "/dashboard"
+    // matches "/dashboard", "/dashboard/", "/dashboard/anything"
+    return pathname === base || pathname.startsWith(base + "/") || pathname.startsWith(base);
   }
   return pathname === pattern;
-}
-
-function redirectToLogin(
-  request: { nextUrl: { origin: string } },
-  NextResponse: { redirect(url: URL): Response }
-): Response {
-  return NextResponse.redirect(new URL("/login", request.nextUrl.origin));
 }

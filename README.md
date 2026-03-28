@@ -202,8 +202,9 @@ interface AuthConfig<User = unknown> {
 
   routes?: {
     public: string[];    // always accessible, e.g. ["/", "/about"]
-    protected: string[]; // require auth, supports wildcard: "/dashboard/*"
-    guestOnly?: string[]; // accessible only when NOT authenticated, e.g. ["/login", "/register"]
+    protected: string[]; // require auth, supports wildcard: "/dashboard*"
+    guestOnly?: string[]; // accessible only when NOT authenticated, e.g. ["/auth/login", "/auth/register"]
+    loginPath?: string;   // where to redirect unauthenticated users (default: "/login")
     redirectAuthenticatedTo?: string; // where to send authenticated users who hit a guestOnly route (default: "/dashboard")
   };
 
@@ -366,9 +367,10 @@ export const authConfig: AuthConfig = {
   // ...
   routes: {
     public: ["/", "/about"],
-    guestOnly: ["/login", "/register"],    // authenticated users get redirected away
-    protected: ["/dashboard/*", "/settings/*"],
-    redirectAuthenticatedTo: "/dashboard", // where to send authenticated users on guestOnly routes
+    guestOnly: ["/auth/login", "/auth/register"], // authenticated users get redirected away
+    protected: ["/dashboard*", "/profile*"],
+    loginPath: "/auth/login",              // where to redirect unauthenticated users
+    redirectAuthenticatedTo: "/dashboard", // where to redirect authenticated users on guestOnly routes
   },
 };
 ```
@@ -382,7 +384,7 @@ export const middleware = authMiddleware(authConfig);
 
 export const config = {
   // Include all routes you want the middleware to run on
-  matcher: ["/login", "/register", "/dashboard/:path*", "/settings/:path*"],
+  matcher: ["/auth/login", "/auth/register", "/dashboard*", "/profile*"],
 };
 ```
 
@@ -390,9 +392,12 @@ Route resolution order inside the middleware:
 
 1. `guestOnly` — if authenticated, redirect to `redirectAuthenticatedTo`
 2. `public` — always allow through
-3. `protected` — require valid session, redirect to `/login` if missing
+3. `protected` — require valid session, redirect to `loginPath` if missing
 
-The `matcher` in `export const config` controls which routes Next.js even runs the middleware on. Any route not in the matcher is ignored entirely, so make sure it covers both your protected and guest-only routes.
+Two things to keep in mind:
+
+- Wildcard patterns use `*` at the end: `"/dashboard*"` matches `/dashboard`, `/dashboard/`, and `/dashboard/settings`
+- The `matcher` in `export const config` controls which routes Next.js runs the middleware on at all — make sure it covers both your protected and guest-only routes
 
 ---
 

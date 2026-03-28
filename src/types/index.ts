@@ -60,7 +60,7 @@ export interface AuthConfig<User = unknown> {
     /** Paths that require authentication */
     protected: string[];
     /**
-     * Paths only accessible when NOT authenticated (e.g. /login, /register).
+     * Paths only accessible when NOT authenticated (e.g. /auth/login, /auth/register).
      * Authenticated users are redirected to `redirectAuthenticatedTo`.
      */
     guestOnly?: string[];
@@ -69,6 +69,11 @@ export interface AuthConfig<User = unknown> {
      * @default "/dashboard"
      */
     redirectAuthenticatedTo?: string;
+    /**
+     * Path to redirect unauthenticated users to when they hit a protected route.
+     * @default "/login"
+     */
+    loginPath?: string;
   };
 
   token: {
