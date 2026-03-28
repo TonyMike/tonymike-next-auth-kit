@@ -44,7 +44,7 @@ Most projects end up with hundreds of lines of boilerplate before a single featu
 - 401 → refresh → retry built into the HTTP client
 - `getServerSession` — read and validate the session in server components and API routes
 - `withAuth` — higher-order function to protect App Router route handlers
-- `authMiddleware` — Next.js middleware factory for edge-level route protection
+- `authMiddleware` — Next.js middleware factory for edge-level route protection with guest-only route support
 - Flexible expiry parsing: `"15m"`, `"2h"`, `"2d"`, `"7d"`, `"1w"`, or plain seconds
 - Three expiry strategies: `backend`, `config`, `hybrid`
 - Fully typed with TypeScript generics for custom user shapes
@@ -95,6 +95,13 @@ export const authConfig: AuthConfig<User> = {
     refresh: "/auth/refresh",
     logout: "/auth/logout",
     me: "/auth/me",
+  },
+
+  routes: {
+    public: ["/", "/about"],
+    guestOnly: ["/login", "/register"],
+    protected: ["/dashboard/*"],
+    redirectAuthenticatedTo: "/dashboard",
   },
 
   token: {
@@ -194,8 +201,10 @@ interface AuthConfig<User = unknown> {
   };
 
   routes?: {
-    public: string[];    // always accessible, e.g. ["/", "/login"]
+    public: string[];    // always accessible, e.g. ["/", "/about"]
     protected: string[]; // require auth, supports wildcard: "/dashboard/*"
+    guestOnly?: string[]; // accessible only when NOT authenticated, e.g. ["/login", "/register"]
+    redirectAuthenticatedTo?: string; // where to send authenticated users who hit a guestOnly route (default: "/dashboard")
   };
 
   token: {
@@ -345,21 +354,45 @@ Unauthenticated requests are redirected to `/login` by default. Pass `{ redirect
 
 ### Middleware (Edge Route Protection)
 
-Protect entire route groups at the edge using Next.js middleware:
+Protect entire route groups at the edge using Next.js middleware. The middleware supports three route categories:
+
+- `public` — always accessible, no auth check
+- `protected` — requires authentication, redirects to `/login` if not
+- `guestOnly` — accessible only when NOT authenticated (e.g. login, register pages); authenticated users are redirected away
 
 ```ts
-// middleware.ts  (project root)
+// lib/auth.ts
+export const authConfig: AuthConfig = {
+  // ...
+  routes: {
+    public: ["/", "/about"],
+    guestOnly: ["/login", "/register"],    // authenticated users get redirected away
+    protected: ["/dashboard/*", "/settings/*"],
+    redirectAuthenticatedTo: "/dashboard", // where to send authenticated users on guestOnly routes
+  },
+};
+```
+
+```ts
+// middleware.ts (project root)
 import { authMiddleware } from "next-token-auth/server";
 import { authConfig } from "@/lib/auth";
 
 export const middleware = authMiddleware(authConfig);
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/settings/:path*"],
+  // Include all routes you want the middleware to run on
+  matcher: ["/login", "/register", "/dashboard/:path*", "/settings/:path*"],
 };
 ```
 
-The middleware reads the encrypted session cookie, checks whether the refresh token is still valid, and redirects to `/login` if not. Routes listed in `config.routes.public` are always allowed through.
+Route resolution order inside the middleware:
+
+1. `guestOnly` — if authenticated, redirect to `redirectAuthenticatedTo`
+2. `public` — always allow through
+3. `protected` — require valid session, redirect to `/login` if missing
+
+The `matcher` in `export const config` controls which routes Next.js even runs the middleware on. Any route not in the matcher is ignored entirely, so make sure it covers both your protected and guest-only routes.
 
 ---
 
