@@ -631,7 +631,7 @@ Your backend needs to implement these endpoints:
 
 Request body: whatever fields you pass to `login()` (e.g. `{ email, password }`)
 
-Response:
+**Response option 1 — user included:**
 
 ```json
 {
@@ -645,10 +645,29 @@ Response:
 
   // Optional — used by "backend" and "hybrid" expiry strategies
   "accessTokenExpiresIn": "2d",
-  "refreshTokenExpiresIn": "7d",
+  "refreshTokenExpiresIn": "7d"
+}
+```
 
-  // Legacy field, also accepted
-  "expiresIn": 172800
+**Response option 2 — user fetched separately:**
+
+If your login endpoint only returns tokens, omit the `user` field and configure the `me` endpoint. The library will automatically call it after login.
+
+```json
+{
+  "accessToken": "eyJhbGc...",
+  "refreshToken": "eyJhbGc...",
+  "accessTokenExpiresIn": "2d",
+  "refreshTokenExpiresIn": "7d"
+}
+```
+
+Then in your config:
+
+```ts
+endpoints: {
+  login: "/auth/login",
+  me: "/auth/me",  // ← library calls this to fetch user profile
 }
 ```
 

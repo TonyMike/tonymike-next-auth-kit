@@ -30,7 +30,7 @@ export interface LoginInput {
 }
 
 export interface LoginResponse<User = unknown> {
-  user: User;
+  user?: User;
   accessToken: string;
   refreshToken: string;
   /** Seconds until access token expires (legacy field) */

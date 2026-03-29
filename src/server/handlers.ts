@@ -62,8 +62,21 @@ export function createAuthHandlers<User = unknown>(config: AuthConfig<User>) {
         const secure = config.token.secure !== false ? "Secure; " : "";
         const sameSite = config.token.sameSite ?? "lax";
 
+        // Fetch user from /me endpoint if not included in login response
+        let user: User | null = data.user ?? null;
+        if (!user && config.endpoints.me) {
+          try {
+            const meRes = await fetchFn(`${config.baseUrl}${config.endpoints.me}`, {
+              headers: { Authorization: `Bearer ${tokens.accessToken}` },
+            });
+            if (meRes.ok) user = (await meRes.json()) as User;
+          } catch {
+            // User fetch failed — continue without user data
+          }
+        }
+
         return NextResponse.json(
-          { ok: true, user: data.user },
+          { ok: true, user },
           {
             headers: {
               "Set-Cookie": [
