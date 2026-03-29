@@ -26,18 +26,22 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 interface AuthProviderProps {
   config: ClientAuthConfig;
   children: React.ReactNode;
+  /** Pre-fetched session from server (use getLayoutSession in your layout) */
+  initialSession?: AuthSession | null;
 }
 
-export function AuthProvider({ config, children }: AuthProviderProps) {
-  const [session, setSession] = useState<AuthSession>({
-    user: null,
-    tokens: null,
-    isAuthenticated: false,
-  });
-  const [isLoading, setIsLoading] = useState(true);
+export function AuthProvider({ config, children, initialSession }: AuthProviderProps) {
+  const [session, setSession] = useState<AuthSession>(
+    initialSession ?? { user: null, tokens: null, isAuthenticated: false }
+  );
+  // If the server pre-seeded the session, skip the loading phase entirely
+  const [isLoading, setIsLoading] = useState(!initialSession);
 
   // Initialize session on mount
   useEffect(() => {
+    // Skip if server already provided initial session
+    if (initialSession) return;
+
     let cancelled = false;
 
     fetch("/api/auth/session")

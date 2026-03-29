@@ -163,13 +163,18 @@ Your `AuthProvider` calls these automatically. You never call them directly.
 ```tsx
 // app/layout.tsx
 import { AuthProvider } from "next-token-auth/react";
+import { getLayoutSession } from "next-token-auth/server";
 import { clientAuthConfig } from "@/lib/auth.client";
+import { authConfig } from "@/lib/auth";
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Pre-fetch session server-side to avoid auth flash on page load
+  const session = await getLayoutSession(authConfig);
+
   return (
     <html lang="en">
       <body>
-        <AuthProvider config={clientAuthConfig}>
+        <AuthProvider config={clientAuthConfig} initialSession={session}>
           {children}
         </AuthProvider>
       </body>
@@ -177,6 +182,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   );
 }
 ```
+
+**Why `initialSession`?** Without it, there's a flash of the wrong auth state on every page load while the client fetches the session. Pre-fetching server-side eliminates the flash — the correct auth state is rendered from the first paint.
 
 ---
 
@@ -312,6 +319,39 @@ If `secret` is in the client config, it gets bundled into your JavaScript and ex
 
 ---
 
+## Avoiding the Auth Flash
+
+Without server-side session pre-fetching, there's a visible flash on every page load:
+
+1. Server sends HTML with `isLoading = true`
+2. Browser renders a skeleton or empty state
+3. Client fetches `/api/auth/session`
+4. UI flips to the correct auth state (flash visible)
+
+To fix this, use `getLayoutSession` in your root layout:
+
+```tsx
+// app/layout.tsx
+import { getLayoutSession } from "next-token-auth/server";
+import { authConfig } from "@/lib/auth";
+
+export default async function RootLayout({ children }) {
+  const session = await getLayoutSession(authConfig);
+
+  return (
+    <AuthProvider config={clientAuthConfig} initialSession={session}>
+      {children}
+    </AuthProvider>
+  );
+}
+```
+
+Now the correct auth state is rendered from the first paint — no flash, no skeleton, no layout shift.
+
+`getLayoutSession` reads and decrypts the session cookie server-side using `next/headers`, which is available in layouts and server components (unlike `getServerSession`, which requires a `NextRequest` and only works in middleware and route handlers).
+
+---
+
 ## API Reference
 
 ### `useAuth()`
@@ -435,6 +475,37 @@ export async function GET() {
 ```
 
 This keeps tokens secure — they never leave the server.
+
+---
+
+### `getLayoutSession(config)`
+
+Reads and validates the session in layouts and server components using `next/headers`.
+
+```ts
+// app/layout.tsx
+import { getLayoutSession } from "next-token-auth/server";
+import { authConfig } from "@/lib/auth";
+
+export default async function RootLayout({ children }) {
+  const session = await getLayoutSession(authConfig);
+
+  return (
+    <AuthProvider config={clientAuthConfig} initialSession={session}>
+      {children}
+    </AuthProvider>
+  );
+}
+```
+
+What it does:
+1. Reads the encrypted session cookie via `next/headers`
+2. Decrypts it using your `secret`
+3. Validates token expiry
+4. Optionally fetches the user profile from your backend
+5. Returns `{ user, isAuthenticated }` (tokens are omitted for client safety)
+
+Use this instead of `getServerSession` when you need the session in a layout or server component where `NextRequest` is not available.
 
 ---
 
