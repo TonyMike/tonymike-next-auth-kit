@@ -138,6 +138,8 @@ export const clientAuthConfig: ClientAuthConfig = {
 
 Create this file to handle login, logout, refresh, and session endpoints automatically.
 
+**Important:** The file path must be exactly `app/api/auth/[action]/route.ts` — the `[action]` part is a Next.js dynamic route segment (keep the square brackets as-is). Do not rename it.
+
 ```ts
 // app/api/auth/[action]/route.ts
 import { createAuthHandlers } from "next-token-auth/server";
