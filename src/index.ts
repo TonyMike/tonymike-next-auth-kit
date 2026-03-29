@@ -17,6 +17,7 @@ export { encrypt, decrypt } from "./utils/crypto";
 // Types
 export type {
   AuthConfig,
+  ClientAuthConfig,
   AuthTokens,
   AuthSession,
   LoginInput,

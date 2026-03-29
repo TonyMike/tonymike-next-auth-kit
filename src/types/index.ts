@@ -41,6 +41,10 @@ export interface LoginResponse<User = unknown> {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+/**
+ * Full auth configuration — SERVER-SIDE ONLY.
+ * Never pass this to AuthProvider or any client component.
+ */
 export interface AuthConfig<User = unknown> {
   /** Base URL of your backend API */
   baseUrl: string;
@@ -83,7 +87,7 @@ export interface AuthConfig<User = unknown> {
     sameSite?: "strict" | "lax" | "none";
   };
 
-  /** Secret used for encrypting stored tokens */
+  /** Secret used for encrypting stored tokens — SERVER-SIDE ONLY */
   secret: string;
 
   /** Automatically refresh access token before expiry */
@@ -116,4 +120,33 @@ export interface AuthConfig<User = unknown> {
   onLogout?: () => void;
   /** Called when token refresh fails */
   onRefreshError?: (error: unknown) => void;
+}
+
+/**
+ * Client-safe auth configuration — safe to pass to AuthProvider.
+ * Does not contain secret or baseUrl.
+ */
+export interface ClientAuthConfig {
+  token?: {
+    cookieName?: string;
+  };
+
+  routes?: {
+    loginPath?: string;
+    redirectAuthenticatedTo?: string;
+  };
+
+  /** Automatically refresh access token before expiry */
+  autoRefresh?: boolean;
+
+  /**
+   * Seconds before expiry to trigger a proactive refresh.
+   * @default 60
+   */
+  refreshThreshold?: number;
+
+  /** Called after a successful login */
+  onLogin?: (session: AuthSession) => void;
+  /** Called after logout */
+  onLogout?: () => void;
 }

@@ -4,6 +4,8 @@ A production-grade authentication library for Next.js. Handles access tokens, re
 
 Works with both the App Router and Pages Router. Fully typed with TypeScript.
 
+> **Breaking change in v1.1.0:** The secret is now server-side only. You must split your config into `AuthConfig` (server) and `ClientAuthConfig` (client), and mount `createAuthHandlers` at `app/api/auth/[action]/route.ts`. See the Quick Start below.
+
 ---
 
 ## The Problem
@@ -75,10 +77,10 @@ react-dom >= 18
 
 ## Quick Start
 
-### 1. Create your config
+### 1. Create your server config
 
 ```ts
-// lib/auth.ts
+// lib/auth.ts (SERVER-SIDE ONLY — never import in client components)
 import type { AuthConfig } from "next-token-auth";
 
 interface User {
@@ -88,7 +90,7 @@ interface User {
 }
 
 export const authConfig: AuthConfig<User> = {
-  baseUrl: process.env.NEXT_PUBLIC_API_URL!,
+  baseUrl: process.env.API_URL!,  // No NEXT_PUBLIC_ prefix needed
 
   endpoints: {
     login: "/auth/login",
@@ -100,7 +102,8 @@ export const authConfig: AuthConfig<User> = {
   routes: {
     public: ["/", "/about"],
     guestOnly: ["/login", "/register"],
-    protected: ["/dashboard/*"],
+    protected: ["/dashboard*"],
+    loginPath: "/login",
     redirectAuthenticatedTo: "/dashboard",
   },
 
@@ -111,7 +114,7 @@ export const authConfig: AuthConfig<User> = {
     sameSite: "lax",
   },
 
-  secret: process.env.AUTH_SECRET!,
+  secret: process.env.AUTH_SECRET!,  // SERVER-SIDE ONLY
 
   autoRefresh: true,
 
@@ -123,25 +126,55 @@ export const authConfig: AuthConfig<User> = {
 };
 ```
 
-### 2. Wrap your app with `AuthProvider`
+### 2. Create your client config
+
+```ts
+// lib/auth.client.ts (safe to import anywhere, including client components)
+import type { ClientAuthConfig } from "next-token-auth";
+
+export const clientAuthConfig: ClientAuthConfig = {
+  token: {
+    cookieName: "myapp.session",
+  },
+  autoRefresh: true,
+};
+```
+
+### 3. Mount the Route Handlers
+
+```ts
+// app/api/auth/[action]/route.ts
+import { createAuthHandlers } from "next-token-auth/server";
+import { authConfig } from "@/lib/auth";
+
+export const { GET, POST } = createAuthHandlers(authConfig);
+```
+
+This creates four endpoints automatically:
+- `POST /api/auth/login` — authenticates and sets HttpOnly cookie
+- `POST /api/auth/logout` — clears the session cookie
+- `POST /api/auth/refresh` — refreshes the access token
+- `GET /api/auth/session` — returns current user and auth status
+
+### 4. Wrap your app with `AuthProvider`
 
 ```tsx
 // app/layout.tsx
 import { AuthProvider } from "next-token-auth/react";
-import { authConfig } from "@/lib/auth";
+import { clientAuthConfig } from "@/lib/auth.client";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <AuthProvider config={authConfig}>{children}</AuthProvider>
+        <AuthProvider config={clientAuthConfig}>{children}</AuthProvider>
       </body>
     </html>
   );
 }
 ```
 
-### 3. Use the hooks
+### 5. Use the hooks
 
 ```tsx
 "use client";
@@ -155,6 +188,7 @@ export default function LoginPage() {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     await login({ email: form.get("email"), password: form.get("password") });
+    window.location.href = "/dashboard";
   }
 
   return (
@@ -175,53 +209,75 @@ export default function LoginPage() {
 
 ### `AuthProvider`
 
-Wrap your application once at the root. It initializes the `AuthClient`, restores any existing session from stored tokens on mount, and subscribes all child hooks to session changes.
+Wrap your application once at the root. It calls `/api/auth/session` on mount to restore the session from the HttpOnly cookie, then subscribes to session changes.
 
 ```tsx
-<AuthProvider config={authConfig}>
+<AuthProvider config={clientAuthConfig}>
   {children}
 </AuthProvider>
 ```
 
-When `autoRefresh: true` is set, the provider checks every 30 seconds whether the access token is near expiry and refreshes it silently in the background.
+When `autoRefresh: true` is set, the provider calls `/api/auth/refresh` periodically based on `refreshThreshold`.
 
-#### Full config reference
+#### Client config reference (`ClientAuthConfig`)
+
+This is what you pass to `AuthProvider` — it does NOT contain `secret` or `baseUrl`.
+
+```ts
+interface ClientAuthConfig {
+  token?: {
+    cookieName?: string;   // default: "next-token-auth.session"
+  };
+
+  routes?: {
+    loginPath?: string;   // where to redirect unauthenticated users (default: "/login")
+    redirectAuthenticatedTo?: string; // where to redirect authenticated users on guestOnly routes (default: "/dashboard")
+  };
+
+  autoRefresh?: boolean;  // automatically refresh tokens before expiry
+
+  refreshThreshold?: number; // seconds before expiry to trigger refresh (default: 60)
+
+  // Lifecycle callbacks
+  onLogin?: (session: AuthSession) => void;
+  onLogout?: () => void;
+}
+```
+
+#### Server config reference (`AuthConfig`)
+
+This is used in `createAuthHandlers`, `authMiddleware`, `getServerSession`, and `withAuth`. Never import this in a client component.
 
 ```ts
 interface AuthConfig<User = unknown> {
-  // Base URL of your backend API
-  baseUrl: string;
+  baseUrl: string;  // Backend API base URL (no NEXT_PUBLIC_ needed)
 
   endpoints: {
     login: string;       // required
     refresh: string;     // required
     register?: string;
     logout?: string;
-    me?: string;         // fetched after login/session restore to populate user
+    me?: string;         // fetched to populate session.user
   };
 
   routes?: {
-    public: string[];     // always accessible regardless of auth state
+    public: string[];     // always accessible
     protected: string[];  // require auth, supports wildcard: "/dashboard*"
-    guestOnly?: string[]; // only accessible when NOT authenticated — any route name works
+    guestOnly?: string[]; // only accessible when NOT authenticated
     loginPath?: string;   // where to redirect unauthenticated users (default: "/login")
-    redirectAuthenticatedTo?: string; // where to send authenticated users who hit a guestOnly route (default: "/dashboard")
+    redirectAuthenticatedTo?: string; // where to redirect authenticated users on guestOnly routes (default: "/dashboard")
   };
 
   token: {
     storage: "cookie" | "memory";
-    cookieName?: string;   // default: "next-token-auth.session"
+    cookieName?: string;
     secure?: boolean;      // default: true
     sameSite?: "strict" | "lax" | "none"; // default: "lax"
   };
 
-  // Used to AES-GCM encrypt session cookies server-side
-  secret: string;
+  secret: string;  // AES-GCM encryption key — SERVER-SIDE ONLY
 
-  // Automatically refresh the access token before it expires
   autoRefresh?: boolean;
-
-  // Seconds before expiry to trigger a proactive refresh (default: 60)
   refreshThreshold?: number;
 
   expiry?: {
@@ -230,7 +286,6 @@ interface AuthConfig<User = unknown> {
     strategy?: "backend" | "config" | "hybrid"; // default: "hybrid"
   };
 
-  // Provide a custom fetch implementation (e.g. for testing)
   fetchFn?: typeof fetch;
 
   // Lifecycle callbacks
@@ -252,10 +307,10 @@ const { session, login, logout, refresh, isLoading } = useAuth<User>();
 
 | Property    | Type                                    | Description                                      |
 |-------------|-----------------------------------------|--------------------------------------------------|
-| `session`   | `AuthSession<User>`                     | Current auth session                             |
-| `login`     | `(input: LoginInput) => Promise<void>`  | POST to your login endpoint, stores tokens       |
-| `logout`    | `() => Promise<void>`                   | Clears tokens, calls logout endpoint if set      |
-| `refresh`   | `() => Promise<void>`                   | Manually trigger a token refresh                 |
+| `session`   | `AuthSession<User>`                     | Current auth session (user + isAuthenticated)    |
+| `login`     | `(input: LoginInput) => Promise<void>`  | POST to `/api/auth/login`, sets HttpOnly cookie  |
+| `logout`    | `() => Promise<void>`                   | POST to `/api/auth/logout`, clears cookie        |
+| `refresh`   | `() => Promise<void>`                   | POST to `/api/auth/refresh`, updates cookie      |
 | `isLoading` | `boolean`                               | `true` while initializing or during login        |
 
 `LoginInput` is an open object (`{ [key: string]: unknown }`), so you can pass any fields your backend expects.
@@ -299,18 +354,17 @@ The hook waits for `isLoading` to be `false` before acting, so it won't flash a 
 
 ### Making Authenticated API Requests
 
-When you need to call your own backend endpoints that require an access token, use `client.fetch` from the `useAuth` hook. It automatically injects `Authorization: Bearer <token>` and handles 401 → refresh → retry for you.
+Since tokens are stored in HttpOnly cookies (inaccessible to JavaScript), you cannot manually add `Authorization` headers from the client. Instead, your backend API routes should read the session cookie and extract the access token server-side.
+
+For client-side requests to your own API:
 
 ```ts
 "use client";
 
-import { useAuth } from "next-token-auth/react";
-
 export default function Orders() {
-  const { client } = useAuth();
-
   async function fetchOrders() {
-    const res = await client.fetch("https://api.example.com/orders");
+    // The session cookie is automatically sent with this request
+    const res = await fetch("/api/orders");
     const data = await res.json();
     console.log(data);
   }
@@ -319,19 +373,35 @@ export default function Orders() {
 }
 ```
 
-You can also read the token directly from the session if you need to pass it manually:
+Then in your API route, read the session:
 
 ```ts
-const { session } = useAuth();
+// app/api/orders/route.ts
+import { getServerSession } from "next-token-auth/server";
+import { authConfig } from "@/lib/auth";
+import { cookies } from "next/headers";
 
-const res = await fetch("https://api.example.com/orders", {
-  headers: {
-    Authorization: `Bearer ${session.tokens?.accessToken}`,
-  },
-});
+export async function GET(req: Request) {
+  const cookieStore = await cookies();
+  const session = await getServerSession(
+    { cookies: { get: (name) => cookieStore.get(name) } },
+    authConfig
+  );
+
+  if (!session.isAuthenticated) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Use session.tokens.accessToken to call your backend
+  const res = await fetch(`${authConfig.baseUrl}/orders`, {
+    headers: { Authorization: `Bearer ${session.tokens!.accessToken}` },
+  });
+
+  return Response.json(await res.json());
+}
 ```
 
-`client.fetch` is the recommended approach — it keeps your requests resilient to token expiry without any extra work on your end.
+This keeps tokens secure — they never leave the server.
 
 ---
 
@@ -378,11 +448,15 @@ export const authConfig: AuthConfig = {
 ```
 
 ```ts
-// middleware.ts (project root)
+// middleware.ts (Next.js 13–15) or proxy.ts (Next.js 16+)
 import { authMiddleware } from "next-token-auth/server";
 import { authConfig } from "@/lib/auth";
 
+// Next.js 13–15
 export const middleware = authMiddleware(authConfig);
+
+// Next.js 16+
+export const proxy = authMiddleware(authConfig);
 
 export const config = {
   matcher: ["/sign-in", "/sign-up", "/app*", "/account*"],
@@ -428,36 +502,38 @@ Two things to keep in mind:
 
 ### How tokens are stored
 
-| Storage mode | Where                                                                 |
-|--------------|-----------------------------------------------------------------------|
-| `"cookie"`   | Serialized as JSON in a browser cookie with `Secure` + `SameSite`    |
-| `"memory"`   | Held in a JavaScript variable — cleared on page refresh               |
+Tokens are always stored in HttpOnly cookies (encrypted with AES-GCM). The `storage: "memory"` option is deprecated — HttpOnly cookies are more secure because JavaScript in the browser cannot access them.
 
-Server-side (in `getServerSession` and `authMiddleware`), the cookie value is expected to be AES-GCM encrypted using your `secret`. The `TokenManager` provides `encryptTokens` / `decryptTokens` helpers for this.
+The cookie is set by the `/api/auth/login` Route Handler (created via `createAuthHandlers`) and read by the middleware and `getServerSession`.
 
 ### Session restore on page load
 
-When `AuthProvider` mounts, it calls `client.initialize()`, which:
+When `AuthProvider` mounts, it calls `GET /api/auth/session`, which:
 
-1. Reads tokens from the configured storage
-2. Checks whether the access token is expired (accounting for `refreshThreshold`)
-3. If the access token is near expiry but the refresh token is still valid, it silently refreshes
-4. If a `me` endpoint is configured, it fetches the user profile to populate `session.user`
-5. Updates React state — `isLoading` flips to `false` once complete
+1. Reads the encrypted session cookie server-side
+2. Decrypts it using your `secret`
+3. Checks whether the refresh token is expired
+4. If a `me` endpoint is configured, fetches the user profile
+5. Returns `{ user, isAuthenticated }` to the client
+
+The client never sees the raw tokens — only the user object and auth status.
 
 ### Automatic refresh
 
-When `autoRefresh: true`, the provider runs a check every 30 seconds. If the access token is within `refreshThreshold` seconds of expiry (default: 60s) and the refresh token is still valid, it calls the refresh endpoint automatically.
+When `autoRefresh: true`, the provider calls `POST /api/auth/refresh` periodically (based on `refreshThreshold`, default 60 seconds before expiry). The Route Handler:
 
-The HTTP client also handles 401 responses: it attempts a token refresh and retries the original request once. Multiple concurrent 401s share a single refresh request (deduplicated via a shared promise).
+1. Reads the encrypted cookie
+2. Checks if the refresh token is still valid
+3. Calls your backend's refresh endpoint with the refresh token
+4. Encrypts the new tokens and updates the HttpOnly cookie
 
 ### Refresh flow
 
 ```
-Request → 401 → refresh endpoint → new tokens stored → original request retried
+Client detects expiry → POST /api/auth/refresh → backend refresh endpoint → new encrypted cookie set
 ```
 
-If the refresh token is expired, the user is logged out and the session is cleared.
+If the refresh token is expired, the session is cleared.
 
 ---
 
@@ -567,7 +643,7 @@ The `parseExpiry` utility accepts:
 ```ts
 interface AuthSession<User = unknown> {
   user: User | null;
-  tokens: AuthTokens | null;
+  tokens: AuthTokens | null;  // always null on client-side (HttpOnly)
   isAuthenticated: boolean;
 }
 
@@ -585,6 +661,28 @@ interface LoginResponse<User = unknown> {
   expiresIn?: number;
   accessTokenExpiresIn?: number | string;
   refreshTokenExpiresIn?: number | string;
+}
+
+// Server-side config (used in createAuthHandlers, middleware, getServerSession)
+interface AuthConfig<User = unknown> {
+  baseUrl: string;
+  secret: string;  // SERVER-SIDE ONLY
+  endpoints: { login: string; refresh: string; logout?: string; me?: string };
+  token: { storage: "cookie" | "memory"; cookieName?: string; secure?: boolean; sameSite?: string };
+  routes?: { public: string[]; protected: string[]; guestOnly?: string[]; loginPath?: string; redirectAuthenticatedTo?: string };
+  expiry?: { accessTokenExpiresIn?: number | string; refreshTokenExpiresIn?: number | string; strategy?: "backend" | "config" | "hybrid" };
+  autoRefresh?: boolean;
+  refreshThreshold?: number;
+}
+
+// Client-side config (used in AuthProvider)
+interface ClientAuthConfig {
+  token?: { cookieName?: string };
+  routes?: { loginPath?: string; redirectAuthenticatedTo?: string };
+  autoRefresh?: boolean;
+  refreshThreshold?: number;
+  onLogin?: (session: AuthSession) => void;
+  onLogout?: () => void;
 }
 
 type ExpiryInput = number | string;
@@ -606,11 +704,13 @@ All types are exported from the root `next-token-auth` import.
 
 ## Security Notes
 
-- Session cookies use `Secure` and `SameSite` flags by default
-- Server-side cookies are AES-GCM encrypted using your `secret`
+- All tokens are stored in HttpOnly cookies — JavaScript in the browser cannot read them
+- Session cookies are AES-GCM encrypted server-side using your `secret`
+- The `secret` never leaves the server — it's only used in Route Handlers, middleware, and `getServerSession`
+- `AuthProvider` receives `ClientAuthConfig` which does not contain `secret` or `baseUrl`
 - Use a random 32-character string for `secret` in production — never commit it
-- The `"memory"` storage mode keeps tokens out of cookies entirely, at the cost of losing the session on page refresh
-- Refresh tokens are never exposed to JavaScript when using server-side encrypted cookies
+- Cookies use `Secure` and `SameSite` flags by default for CSRF protection
+- The `"memory"` storage mode is no longer recommended — HttpOnly cookies are more secure
 
 ---
 

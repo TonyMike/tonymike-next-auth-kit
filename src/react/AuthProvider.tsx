@@ -5,11 +5,9 @@ import React, {
   useCallback,
   useContext,
   useEffect,
-  useRef,
   useState,
 } from "react";
-import { AuthClient } from "../core/AuthClient";
-import type { AuthConfig, AuthSession, LoginInput } from "../types";
+import type { AuthSession, ClientAuthConfig, LoginInput } from "../types";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -19,32 +17,19 @@ interface AuthContextValue<User = unknown> {
   login: (input: LoginInput) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  /** The underlying AuthClient for advanced use cases */
-  client: AuthClient<User>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-interface AuthProviderProps<User = unknown> {
-  config: AuthConfig<User>;
+interface AuthProviderProps {
+  config: ClientAuthConfig;
   children: React.ReactNode;
 }
 
-export function AuthProvider<User = unknown>({
-  config,
-  children,
-}: AuthProviderProps<User>) {
-  const clientRef = useRef<AuthClient<User> | null>(null);
-
-  if (!clientRef.current) {
-    clientRef.current = new AuthClient<User>(config);
-  }
-
-  const client = clientRef.current;
-
-  const [session, setSession] = useState<AuthSession<User>>({
+export function AuthProvider({ config, children }: AuthProviderProps) {
+  const [session, setSession] = useState<AuthSession>({
     user: null,
     tokens: null,
     isAuthenticated: false,
@@ -55,79 +40,104 @@ export function AuthProvider<User = unknown>({
   useEffect(() => {
     let cancelled = false;
 
-    client.initialize().then((s) => {
-      if (!cancelled) {
-        setSession(s);
-        setIsLoading(false);
-      }
-    });
-
-    // Subscribe to session changes
-    const unsubscribe = client.subscribe((s) => {
-      if (!cancelled) setSession(s);
-    });
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) {
+          setSession({
+            user: data.user ?? null,
+            tokens: null, // tokens are HttpOnly, never exposed to client
+            isAuthenticated: data.isAuthenticated ?? false,
+          });
+          setIsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSession({ user: null, tokens: null, isAuthenticated: false });
+          setIsLoading(false);
+        }
+      });
 
     return () => {
       cancelled = true;
-      unsubscribe();
     };
-  }, [client]);
+  }, []);
 
   // Auto-refresh timer
   useEffect(() => {
     if (!config.autoRefresh) return;
 
     const interval = setInterval(async () => {
-      const tokens = client.tokenManager.getTokens();
-      if (
-        tokens &&
-        client.tokenManager.isAccessExpired(tokens) &&
-        !client.tokenManager.isRefreshExpired(tokens)
-      ) {
-        await client.refresh();
+      if (session.isAuthenticated) {
+        try {
+          await fetch("/api/auth/refresh", { method: "POST" });
+          const updated = await fetch("/api/auth/session").then((r) => r.json());
+          setSession({
+            user: updated.user ?? null,
+            tokens: null,
+            isAuthenticated: updated.isAuthenticated ?? false,
+          });
+        } catch {
+          // Refresh failed — session will be cleared on next page load
+        }
       }
-    }, 30_000); // check every 30s
+    }, (config.refreshThreshold ?? 60) * 1000);
 
     return () => clearInterval(interval);
-  }, [client, config.autoRefresh]);
+  }, [config.autoRefresh, config.refreshThreshold, session.isAuthenticated]);
 
   const login = useCallback(
     async (input: LoginInput) => {
       setIsLoading(true);
       try {
-        const s = await client.login(input);
-        setSession(s);
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+
+        if (!res.ok) {
+          const { error } = await res.json();
+          throw new Error(error ?? "Login failed");
+        }
+
+        const { user } = await res.json();
+        const newSession = { user, tokens: null, isAuthenticated: true };
+        setSession(newSession);
+        config.onLogin?.(newSession);
       } finally {
         setIsLoading(false);
       }
     },
-    [client]
+    [config]
   );
 
   const logout = useCallback(async () => {
-    await client.logout();
+    await fetch("/api/auth/logout", { method: "POST" });
     setSession({ user: null, tokens: null, isAuthenticated: false });
-  }, [client]);
+    config.onLogout?.();
+  }, [config]);
 
   const refresh = useCallback(async () => {
-    await client.refresh();
-    setSession(client.getSession());
-  }, [client]);
+    await fetch("/api/auth/refresh", { method: "POST" });
+    const updated = await fetch("/api/auth/session").then((r) => r.json());
+    setSession({
+      user: updated.user ?? null,
+      tokens: null,
+      isAuthenticated: updated.isAuthenticated ?? false,
+    });
+  }, []);
 
-  const value: AuthContextValue<User> = {
+  const value: AuthContextValue = {
     session,
     isLoading,
     login,
     logout,
     refresh,
-    client,
   };
 
-  return (
-    <AuthContext.Provider value={value as AuthContextValue}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 // ─── Internal hook ────────────────────────────────────────────────────────────

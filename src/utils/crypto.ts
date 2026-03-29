@@ -15,6 +15,12 @@ function getTextDecoder() {
 }
 
 async function deriveKey(secret: string): Promise<CryptoKey> {
+  if (!secret) {
+    throw new Error(
+      "[next-token-auth] `secret` is undefined. " +
+        "If using cookie storage, ensure AUTH_SECRET is set in your environment."
+    );
+  }
   const raw = getTextEncoder().encode(secret.padEnd(32, "0").slice(0, 32));
   return crypto.subtle.importKey("raw", raw, { name: ALGO }, false, [
     "encrypt",
